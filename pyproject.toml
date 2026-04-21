@@ -1,0 +1,14 @@
+[project]
+name = "diffusion-time-series"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipywidgets>=8.1.8",
+    "marimo>=0.23.1",
+    "nbformat>=5.10.4",
+    "plotly>=6.7.0",
+    "polars>=1.40.0",
+    "torch>=2.8.0",
+]
