@@ -8,7 +8,9 @@ dependencies = [
     "ipywidgets>=8.1.8",
     "marimo>=0.23.1",
     "nbformat>=5.10.4",
+    "numpy>=2.4.4",
     "plotly>=6.7.0",
     "polars>=1.40.0",
     "torch>=2.8.0",
+    "tqdm>=4.67.1",
 ]

@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm.auto import tqdm
 
 
-def _reshape_for_broadcast(values: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
+def reshape_for_broadcast(values: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
 	return values.view(-1, *([1] * (like.dim() - 1)))
 
 
-def _sinusoidal_embedding(values: torch.Tensor, dim: int, max_period: float = 10_000.0) -> torch.Tensor:
-	if dim <= 0:
-		raise ValueError("embedding dimension must be positive")
-
+def sinusoidal_embedding(values: torch.Tensor, dim: int, max_period: float = 10_000.0) -> torch.Tensor:
 	half_dim = dim // 2
 	if half_dim == 0:
 		return values.unsqueeze(-1)
@@ -32,28 +31,31 @@ def _sinusoidal_embedding(values: torch.Tensor, dim: int, max_period: float = 10
 	return embedding
 
 
-def _to_b1l1(x: torch.Tensor, name: str = "tensor") -> torch.Tensor:
+def to_b1l1(x: torch.Tensor, name: str = "tensor") -> torch.Tensor:
 	if x.dim() == 4:
-		if x.shape[1] != 1 or x.shape[-1] != 1:
-			raise ValueError(name + " with 4 dims must have shape (B,1,L,1)")
 		return x
+
+	if x.dim() == 1:
+		return x.unsqueeze(0).unsqueeze(1).unsqueeze(-1)
 
 	if x.dim() == 3:
 		if x.shape[1] == 1:
 			return x.unsqueeze(-1)
 		if x.shape[-1] == 1:
 			return x.unsqueeze(1)
-		raise ValueError(name + " with 3 dims must be (B,1,L) or (B,L,1)")
 
 	if x.dim() == 2:
 		return x.unsqueeze(1).unsqueeze(-1)
 
-	raise ValueError(name + " must have 2, 3, or 4 dimensions")
+	raise ValueError(f"{name} must have 1, 2, 3, or 4 dimensions, got shape={tuple(x.shape)}")
 
 
-def _restore_like(x: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
+
+def restore_like(x: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
 	if reference.dim() == 4:
 		return x
+	if reference.dim() == 1:
+		return x.squeeze(0).squeeze(0).squeeze(-1)
 	if reference.dim() == 3:
 		if reference.shape[1] == 1:
 			return x.squeeze(-1)
@@ -61,12 +63,10 @@ def _restore_like(x: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
 			return x.squeeze(1)
 	if reference.dim() == 2:
 		return x.squeeze(1).squeeze(-1)
-	raise ValueError("reference tensor must have 2, 3, or 4 dimensions")
+	raise ValueError(f"reference must have 1, 2, 3, or 4 dimensions, got shape={tuple(reference.shape)}")
 
 
 class Conv1x1LastDim(nn.Module):
-	"""Applies a 1x1 conv to the last dimension of tensors shaped (B,1,L,C)."""
-
 	def __init__(self, in_channels: int, out_channels: int) -> None:
 		super().__init__()
 		self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
@@ -82,7 +82,6 @@ class CSDIResidualLayer(nn.Module):
 		self,
 		hidden_channels: int,
 		side_channels: int,
-		*,
 		nheads: int,
 		dropout: float,
 	) -> None:
@@ -118,11 +117,8 @@ class CSDIResidualLayer(nn.Module):
 
 
 class CSDIDenoiser(nn.Module):
-	"""CSDI-style denoiser for single-feature sequences."""
-
 	def __init__(
 		self,
-		*,
 		hidden_channels: int = 64,
 		n_residual_layers: int = 4,
 		nheads: int = 8,
@@ -131,12 +127,6 @@ class CSDIDenoiser(nn.Module):
 		time_embedding_dim: int = 128,
 	) -> None:
 		super().__init__()
-		if hidden_channels <= 0:
-			raise ValueError("hidden_channels must be positive")
-		if n_residual_layers <= 0:
-			raise ValueError("n_residual_layers must be positive")
-		if hidden_channels % nheads != 0:
-			raise ValueError("hidden_channels must be divisible by nheads")
 
 		self.hidden_channels = hidden_channels
 		self.diffusion_embedding_dim = diffusion_embedding_dim
@@ -165,7 +155,7 @@ class CSDIDenoiser(nn.Module):
 		self.output_projection_1 = Conv1x1LastDim(hidden_channels, hidden_channels)
 		self.output_projection_2 = Conv1x1LastDim(hidden_channels, 1)
 
-	def _prepare_condition(
+	def prepare_condition(
 		self,
 		x_t: torch.Tensor,
 		condition: dict[str, torch.Tensor] | torch.Tensor | None,
@@ -179,28 +169,17 @@ class CSDIDenoiser(nn.Module):
 			m_co_raw = condition.get("m_co")
 			time_index = condition.get("time_index")
 
-			x_co = _to_b1l1(x_co_raw, name="condition['x_co']") if isinstance(x_co_raw, torch.Tensor) else torch.zeros_like(x_t)
-			# If condition is provided, default mask is all ones unless explicitly supplied.
-			m_co = _to_b1l1(m_co_raw, name="condition['m_co']") if isinstance(m_co_raw, torch.Tensor) else torch.ones_like(x_t)
-		elif isinstance(condition, torch.Tensor):
-			x_co = _to_b1l1(condition, name="condition")
-			m_co = torch.ones_like(x_t)
-			time_index = None
+			x_co = to_b1l1(x_co_raw, name="condition['x_co']") if isinstance(x_co_raw, torch.Tensor) else torch.zeros_like(x_t)
+			m_co = to_b1l1(m_co_raw, name="condition['m_co']") if isinstance(m_co_raw, torch.Tensor) else torch.ones_like(x_t)
 		else:
 			raise TypeError("condition must be None, a tensor, or a dict")
 
-		if x_co.shape != x_t.shape:
-			raise ValueError("x_co shape must match x_t shape")
-		if m_co.shape != x_t.shape:
-			raise ValueError("m_co shape must match x_t shape")
-
 		return x_co, m_co, time_index
 
-	def _build_time_context(
+	def build_time_context(
 		self,
 		batch_size: int,
 		seq_len: int,
-		*,
 		device: torch.device,
 		dtype: torch.dtype,
 		time_index: torch.Tensor | None,
@@ -208,17 +187,11 @@ class CSDIDenoiser(nn.Module):
 		if time_index is None:
 			time_index = torch.arange(seq_len, device=device, dtype=dtype).unsqueeze(0).expand(batch_size, -1)
 		elif time_index.dim() == 1:
-			if time_index.shape[0] != seq_len:
-				raise ValueError("1D time_index length must match sequence length")
 			time_index = time_index.to(device=device, dtype=dtype).unsqueeze(0).expand(batch_size, -1)
 		elif time_index.dim() == 2:
-			if time_index.shape != (batch_size, seq_len):
-				raise ValueError("2D time_index must have shape (B, L)")
 			time_index = time_index.to(device=device, dtype=dtype)
-		else:
-			raise ValueError("time_index must be None, 1D, or 2D")
 
-		time_embedding = _sinusoidal_embedding(time_index, self.time_embedding_dim)
+		time_embedding = sinusoidal_embedding(time_index, self.time_embedding_dim)
 		return time_embedding.unsqueeze(1)
 
 	def forward(
@@ -228,20 +201,20 @@ class CSDIDenoiser(nn.Module):
 		condition: dict[str, torch.Tensor] | torch.Tensor | None = None,
 	) -> torch.Tensor:
 		x_reference = x_t
-		x_t = _to_b1l1(x_t, name="x_t")
+		x_t = to_b1l1(x_t, name="x_t")
 		batch_size, _, seq_len, _ = x_t.shape
 
-		x_co, m_co, time_index = self._prepare_condition(x_t, condition)
+		x_co, m_co, time_index = self.prepare_condition(x_t, condition)
 
 		main_input = torch.cat([x_t, x_co], dim=-1)
 		h = F.relu(self.main_projection(main_input))
 
-		t_embedding = _sinusoidal_embedding(t, self.diffusion_embedding_dim).to(device=x_t.device, dtype=x_t.dtype)
+		t_embedding = sinusoidal_embedding(t, self.diffusion_embedding_dim).to(device=x_t.device, dtype=x_t.dtype)
 		t_embedding = self.diffusion_embedding_projection(t_embedding)
 		t_embedding = t_embedding.view(batch_size, 1, 1, self.diffusion_embedding_dim)
 		h = h + self.diffusion_to_hidden(t_embedding)
 
-		time_context = self._build_time_context(
+		time_context = self.build_time_context(
 			batch_size=batch_size,
 			seq_len=seq_len,
 			device=x_t.device,
@@ -259,7 +232,6 @@ class CSDIDenoiser(nn.Module):
 		h = F.relu(self.output_projection_1(h))
 		h = self.output_projection_2(h)
 
-		# Apply output masking only for mixed masks (true observed-vs-target masks).
 		flat_mask = m_co.view(batch_size, -1)
 		is_all_zero = flat_mask.eq(0).all(dim=1)
 		is_all_one = flat_mask.eq(1).all(dim=1)
@@ -268,14 +240,13 @@ class CSDIDenoiser(nn.Module):
 			apply_mask = should_apply_mask.view(batch_size, 1, 1, 1)
 			h = torch.where(apply_mask, h * (1.0 - m_co), h)
 
-		return _restore_like(h, x_reference)
+		return restore_like(h, x_reference)
 
 
 class CosineScheduler(nn.Module):
 	def __init__(
 		self,
 		timesteps: int,
-		*,
 		s: float = 0.008,
 		beta_min: float = 1e-5,
 		beta_max: float = 0.999,
@@ -336,7 +307,7 @@ class CosineScheduler(nn.Module):
 		}
 		if like is None:
 			return coeffs
-		return {k: _reshape_for_broadcast(v, like) for k, v in coeffs.items()}
+		return {k: reshape_for_broadcast(v, like) for k, v in coeffs.items()}
 
 
 
@@ -345,8 +316,7 @@ class DiffusionModel(nn.Module):
 		self,
 		timesteps: int,
 		denoiser: nn.Module | None = None,
-		*,
-		cond_drop_prob: float = 0.1,
+		cond_drop_prob: float = 0.2,
 	) -> None:
 		super().__init__()
 		self.scheduler = CosineScheduler(timesteps=timesteps)
@@ -383,7 +353,7 @@ class DiffusionModel(nn.Module):
 			trajectory.append(x_t)
 		return trajectory
 
-	def _predict_noise(
+	def predict_noise(
 		self,
 		x_t: torch.Tensor,
 		t: torch.Tensor,
@@ -397,7 +367,7 @@ class DiffusionModel(nn.Module):
 		eps_cond = self.denoiser(x_t, t, condition)
 		return eps_uncond + guidance_scale * (eps_cond - eps_uncond)
 
-	def _p_mean_variance(
+	def p_mean_variance(
 		self,
 		x_t: torch.Tensor,
 		t: torch.Tensor,
@@ -405,7 +375,7 @@ class DiffusionModel(nn.Module):
 		guidance_scale: float,
 	) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 		coeffs = self.scheduler.coefficients(t, like=x_t)
-		eps_theta = self._predict_noise(x_t, t, condition=condition, guidance_scale=guidance_scale)
+		eps_theta = self.predict_noise(x_t, t, condition=condition, guidance_scale=guidance_scale)
 
 		x0_pred = (x_t - coeffs["sqrt_one_minus_alpha_cumprod"] * eps_theta) / coeffs["sqrt_alpha_cumprod"]
 		model_mean = coeffs["posterior_mean_coef1"] * x0_pred + coeffs["posterior_mean_coef2"] * x_t
@@ -416,11 +386,10 @@ class DiffusionModel(nn.Module):
 		self,
 		x_t: torch.Tensor,
 		t: torch.Tensor,
-		*,
 		condition: dict[str, torch.Tensor] | torch.Tensor | None = None,
 		guidance_scale: float = 0.0,
 	) -> torch.Tensor:
-		mean, _, log_variance = self._p_mean_variance(
+		mean, _, log_variance = self.p_mean_variance(
 			x_t,
 			t,
 			condition=condition,
@@ -434,7 +403,6 @@ class DiffusionModel(nn.Module):
 	def sample(
 		self,
 		shape,
-		*,
 		condition: dict[str, torch.Tensor] | torch.Tensor | None = None,
 		guidance_scale: float = 0.0,
 		device: torch.device | None = None,
@@ -448,49 +416,42 @@ class DiffusionModel(nn.Module):
 			x_t = self.denoise_step(x_t, t, condition=condition, guidance_scale=guidance_scale)
 		return x_t
 
-	def _drop_condition(self, condition: torch.Tensor, drop_mask: torch.Tensor) -> torch.Tensor:
+	def drop_condition(self, condition: torch.Tensor, drop_mask: torch.Tensor) -> torch.Tensor:
 		mask = drop_mask.view(-1, *([1] * (condition.dim() - 1)))
 		return torch.where(mask, torch.zeros_like(condition), condition)
 
-	def _drop_condition_any(
+	def drop_condition_any(
 		self,
 		condition: dict[str, torch.Tensor] | torch.Tensor,
 		drop_mask: torch.Tensor,
 	) -> dict[str, torch.Tensor] | torch.Tensor:
-		if isinstance(condition, torch.Tensor):
-			return self._drop_condition(condition, drop_mask)
-		if isinstance(condition, dict):
-			condition_payload = dict(condition)
-			x_co = condition_payload.get("x_co")
-			m_co = condition_payload.get("m_co")
-			if isinstance(x_co, torch.Tensor) and not isinstance(m_co, torch.Tensor):
-				condition_payload["m_co"] = torch.ones_like(x_co)
+		condition_payload = dict(condition)
+		x_co = condition_payload.get("x_co")
+		m_co = condition_payload.get("m_co")
+		if isinstance(x_co, torch.Tensor) and not isinstance(m_co, torch.Tensor):
+			condition_payload["m_co"] = torch.ones_like(x_co)
 
-			dropped = {}
-			for key, value in condition_payload.items():
-				if key in {"x_co", "m_co"} and isinstance(value, torch.Tensor):
-					mask = drop_mask.view(-1, *([1] * (value.dim() - 1)))
-					dropped[key] = torch.where(mask, torch.zeros_like(value), value)
-				elif isinstance(value, torch.Tensor):
-					dropped[key] = value
-			return dropped
+		dropped = {}
+		for key, value in condition_payload.items():
+			if key in {"x_co", "m_co"} and isinstance(value, torch.Tensor):
+				mask = drop_mask.view(-1, *([1] * (value.dim() - 1)))
+				dropped[key] = torch.where(mask, torch.zeros_like(value), value)
+			elif isinstance(value, torch.Tensor):
+				dropped[key] = value
+		return dropped
 
-	def _move_condition_to_device(
+	def move_condition_to_device(
 		self,
 		condition: dict[str, torch.Tensor] | torch.Tensor,
 		device: torch.device,
 	) -> dict[str, torch.Tensor] | torch.Tensor:
-		if isinstance(condition, torch.Tensor):
-			return condition.to(device)
-		if isinstance(condition, dict):
-			moved = {}
-			for key, value in condition.items():
-				if isinstance(value, torch.Tensor):
-					moved[key] = value.to(device)
-			return moved
-		raise TypeError("condition must be tensor or dict")
+		moved = {}
+		for key, value in condition.items():
+			if isinstance(value, torch.Tensor):
+				moved[key] = value.to(device)
+		return moved
 
-	def _masked_ddpm_loss(
+	def masked_ddpm_loss(
 		self,
 		noise_pred: torch.Tensor,
 		noise_target: torch.Tensor,
@@ -501,44 +462,40 @@ class DiffusionModel(nn.Module):
 
 	def train_ddpm(
 		self,
-		dataloader,
-		*,
-		epochs: int = 1,
+		train_dataloader,
+		val_dataloader,
+		model_save_path: Path,
 		optimizer: torch.optim.Optimizer,
 		device: torch.device,
+		epochs: int = 1,
 	) -> list[float]:
 		self.to(device)
 		self.train()
 
+		best_loss = float("inf")
+
+		total_steps = epochs * len(train_dataloader)
+		progress = tqdm(total=total_steps, desc="DDPM training", unit="batch")
+
 		epoch_losses = []
-		for _ in range(epochs):
+		for epoch_idx in range(epochs):
 			total_loss = 0.0
 			batches = 0
-			for batch in dataloader:
-				if isinstance(batch, dict):
-					x0 = batch.get("x0")
-					condition = batch.get("condition")
-
-				elif isinstance(batch, (tuple, list)):
-					x0 = batch[0]
-					condition = batch[1] if len(batch) > 1 else None
-				else:
-					x0 = batch
-					condition = None
+			for batch in train_dataloader:
+				x0 = batch.get("x0")
+				condition = batch.get("condition")
 
 				x0 = x0.to(device)
-				if isinstance(condition, (torch.Tensor, dict)):
-					condition = self._move_condition_to_device(condition, device)
+				condition = self.move_condition_to_device(condition, device)
 
 				t = self.sample_timesteps(x0.shape[0], device=device)
 				x_t, noise = self.add_noise(x0, t)
 
-				if isinstance(condition, (torch.Tensor, dict)):
-					drop_mask = torch.rand(x0.shape[0], device=device) < self.cond_drop_prob
-					condition = self._drop_condition_any(condition, drop_mask)
+				drop_mask = torch.rand(x0.shape[0], device=device) < self.cond_drop_prob
+				condition = self.drop_condition_any(condition, drop_mask)
 
 				noise_pred = self.denoiser(x_t, t, condition)
-				loss = self._masked_ddpm_loss(noise_pred, noise, condition)
+				loss = self.masked_ddpm_loss(noise_pred, noise, condition)
 
 				optimizer.zero_grad(set_to_none=True)
 				loss.backward()
@@ -546,8 +503,52 @@ class DiffusionModel(nn.Module):
 
 				total_loss += float(loss.item())
 				batches += 1
+				progress.update(1)
+				progress.set_postfix(
+					loss=f"{loss.item():.6f}",
+					epoch=f"{epoch_idx + 1}/{epochs}",
+				)
 
-			epoch_losses.append(total_loss / max(1, batches))
+			epoch_train_loss = total_loss / max(1, batches)
 
+			val_loss_text = "n/a"
+			epoch_val_loss = None
+			if val_dataloader is not None:
+				self.eval()
+				val_total_loss = 0.0
+				val_batches = 0
+				with torch.no_grad():
+					for batch in val_dataloader:
+						x0 = batch.get("x0")
+						condition = batch.get("condition")
+
+						x0 = x0.to(device)
+						condition = self.move_condition_to_device(condition, device)
+
+						t = self.sample_timesteps(x0.shape[0], device=device)
+						x_t, noise = self.add_noise(x0, t)
+						noise_pred = self.denoiser(x_t, t, condition)
+						val_loss = self.masked_ddpm_loss(noise_pred, noise, condition)
+
+						val_total_loss += float(val_loss.item())
+						val_batches += 1
+
+				epoch_val_loss = val_total_loss / max(1, val_batches)
+				val_loss_text = f"{epoch_val_loss:.6f}"
+				self.train()
+
+			comparison_loss = epoch_val_loss if epoch_val_loss is not None else epoch_train_loss
+			if comparison_loss < best_loss:
+				torch.save(self.state_dict(), model_save_path)
+				best_loss = comparison_loss
+
+			epoch_losses.append(epoch_train_loss)
+			progress.set_postfix(
+				train_loss=f"{epoch_train_loss:.6f}",
+				val_loss=val_loss_text,
+				epoch=f"{epoch_idx + 1}/{epochs}",
+			)
+
+		progress.close()
 		return epoch_losses
 
