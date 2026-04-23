@@ -8,6 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm.auto import tqdm
 
+from diffusion_model.inference_utils import fourier_loss, total_variation_loss
+
 
 def reshape_for_broadcast(values: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
 	return values.view(-1, *([1] * (like.dim() - 1)))
@@ -327,6 +329,10 @@ class DiffusionModel(nn.Module):
 	def timesteps(self) -> int:
 		return self.scheduler.timesteps
 
+	@timesteps.setter
+	def timesteps(self, new_steps: int) -> None:
+		self.scheduler.timesteps = new_steps
+
 	def sample_timesteps(self, batch_size: int, device: torch.device) -> torch.Tensor:
 		return torch.randint(0, self.timesteps, (batch_size,), device=device)
 
@@ -425,14 +431,13 @@ class DiffusionModel(nn.Module):
 		condition: dict[str, torch.Tensor] | torch.Tensor,
 		drop_mask: torch.Tensor,
 	) -> dict[str, torch.Tensor] | torch.Tensor:
-		condition_payload = dict(condition)
-		x_co = condition_payload.get("x_co")
-		m_co = condition_payload.get("m_co")
+		x_co = condition.get("x_co")
+		m_co = condition.get("m_co")
 		if isinstance(x_co, torch.Tensor) and not isinstance(m_co, torch.Tensor):
-			condition_payload["m_co"] = torch.ones_like(x_co)
+			condition["m_co"] = torch.ones_like(x_co)
 
 		dropped = {}
-		for key, value in condition_payload.items():
+		for key, value in condition.items():
 			if key in {"x_co", "m_co"} and isinstance(value, torch.Tensor):
 				mask = drop_mask.view(-1, *([1] * (value.dim() - 1)))
 				dropped[key] = torch.where(mask, torch.zeros_like(value), value)
@@ -551,4 +556,78 @@ class DiffusionModel(nn.Module):
 
 		progress.close()
 		return epoch_losses
+
+	def financial_time_series_inference(
+		self: DiffusionModel,
+		sample: dict[str , torch.Tensor  | dict[str, torch.Tensor]],
+		device,
+		N: int,
+		T_prime: int,
+		corrector_steps: int,
+		f_cutoff: float,
+		eta: float = 0.01,
+		s: int = 5,
+		guidance_scale: float = 3.0,
+		langevin_snr: float = 0.16,
+		seq_dim: int = -1
+    ) -> torch.Tensor:
+		x_list = []
+		K = int(N * T_prime / self.timesteps)
+
+		for _ in range(s):
+			x0 = sample.get("x0")
+			condition = sample.get("condition")
+			if not isinstance(x0, torch.Tensor):
+				raise ValueError("sample['x0'] must be a torch.Tensor")
+			if not isinstance(condition, dict) or "x_co" not in condition:
+				raise ValueError("sample['condition'] must be a dict containing key 'x_co'")
+
+			x0 = x0.to(device)
+			condition = self.move_condition_to_device(condition, device)
+			batch_size = x0.shape[0]
+
+			T_prime_vector = torch.full((1,), T_prime, device=device, dtype=torch.long)
+
+			x_K, _ = self.add_noise(x0, T_prime_vector)
+			x_i = x_K
+
+			for i in range(K-1, 0, -1):
+				t_i = torch.full((1,), (i+1) * T_prime / N, device=device, dtype=torch.long)
+				x_i = self.denoise_step(x_i, t_i, condition=condition, guidance_scale=guidance_scale)
+
+				for j in range(1, corrector_steps):
+					coeffs = self.scheduler.coefficients(t_i, x_i)
+					sigma_j = coeffs["sqrt_one_minus_alpha_cumprod"]
+
+					eps_theta = self.predict_noise(x_i, t_i, condition=condition, guidance_scale=guidance_scale)
+
+					alpha_j = (langevin_snr * sigma_j) ** 2
+
+					z = torch.rand_like(x_i)
+
+					x_i = x_i - (alpha_j / (2 * sigma_j)) * eps_theta + torch.sqrt(alpha_j) * z
+
+				with torch.enable_grad():
+					x_in = x_i.detach().requires_grad_(True)
+					
+					loss_tv = total_variation_loss(x_in, seq_dim=seq_dim)
+					loss_f = fourier_loss(x_in, condition["x_co"], f=f_cutoff, seq_dim=seq_dim)
+					
+					total_loss = (eta * loss_tv) + (eta * loss_f)
+					
+					grad_x = torch.autograd.grad(total_loss, x_in)[0]
+
+				x_i = x_i - grad_x
+
+			x_list.append(x_i)
+
+		return torch.stack(x_list, dim=0).mean(dim=0)
+     
+					
+       
+      
+
+
+
+     
 

@@ -34,8 +34,6 @@ def _(torch):
 def _(DiffusionModel, TIMESTAMPS, device, torch):
     model_12h = DiffusionModel(timesteps=TIMESTAMPS).to(device)
     model_12h.load_state_dict(torch.load("models/bnb_12h_denoiser"))
-
-    model_12h.scheduler.timesteps = 50
     return (model_12h,)
 
 
@@ -60,6 +58,36 @@ def _(create_candle_train_val_dataloaders, torch):
 @app.cell
 def _(device, model_12h, plot_random_denoise_samples, val_dataloader_12h):
     plot_random_denoise_samples(model_12h, val_dataloader_12h, device=device)
+    return
+
+
+@app.cell
+def _(
+    DiffusionModel,
+    TIMESTAMPS,
+    create_candle_train_val_dataloaders,
+    device,
+    plot_random_denoise_samples,
+    torch,
+):
+    model_1h = DiffusionModel(timesteps=TIMESTAMPS).to(device)
+    model_1h.load_state_dict(torch.load("models/bnb_1h_denoiser"))
+
+    train_dataloader_1h, val_dataloader_1h, _ = create_candle_train_val_dataloaders(
+        parquet_path="data/bnbusdt_candles_2025_1h.parquet",
+        feature_columns=["Close"],
+        window_size=60,
+        step_size=20,
+        batch_size=64,
+        train_ratio=0.8,
+        include_condition=True,
+        time_column="OpenTime",
+        normalize_time=True,
+        normalize_features=True,
+        dtype=torch.float32,
+    )
+
+    plot_random_denoise_samples(model_1h, val_dataloader_1h, device=device)
     return
 
 
@@ -120,6 +148,11 @@ def _(
     )
 
     plot_random_denoise_samples(model_1m, val_dataloader_1m, device=device)
+    return
+
+
+@app.cell
+def _():
     return
 
 

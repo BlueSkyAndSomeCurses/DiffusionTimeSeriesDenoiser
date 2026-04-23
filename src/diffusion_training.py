@@ -36,7 +36,7 @@ def _(DiffusionModel, Path, create_candle_train_val_dataloaders, torch):
         window_size: int = 60,
         step_size: int = 20,
         batch_size: int = 64,
-        timesteps: int = 200,
+        timesteps: int = 1000,
         epochs: int = 2,
         lr: float = 1e-4,
         num_workers: int = 0,
@@ -92,7 +92,7 @@ def _(TIME_COLUMN, VALUE_COLUMN, train_diffusion_from_parquet):
         window_size=60,
         step_size=20,
         batch_size=64,
-        timesteps=200,
+        timesteps=1000,
         epochs=200,
         lr=1e-4,
         model_save_path = "models/bnb_12h_denoiser"
@@ -111,7 +111,7 @@ def _(TIME_COLUMN, VALUE_COLUMN, train_diffusion_from_parquet):
         window_size=60,
         step_size=20,
         batch_size=64,
-        timesteps=200,
+        timesteps=1000,
         epochs=200,
         lr=1e-4,
         model_save_path = "models/bnb_1h_denoiser"
@@ -130,7 +130,7 @@ def _(TIME_COLUMN, VALUE_COLUMN, train_diffusion_from_parquet):
         window_size=60,
         step_size=20,
         batch_size=64,
-        timesteps=200,
+        timesteps=1000,
         epochs=200,
         lr=1e-4,
         model_save_path = "models/bnb_15m_denoiser"
@@ -149,7 +149,7 @@ def _(TIME_COLUMN, VALUE_COLUMN, train_diffusion_from_parquet):
         window_size=60,
         step_size=20,
         batch_size=64,
-        timesteps=200,
+        timesteps=1000,
         epochs=200,
         lr=1e-4,
         model_save_path = "models/bnb_1m_denoiser"
