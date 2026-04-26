@@ -3,17 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import polars as pl
 import torch
 from torch.utils.data import DataLoader, Dataset
 
 
 def build_group_series(
-	parquet_path: Path | str,
+	currency_klines: pl.DataFrame,
 	feature_columns,
 	time_column: str | None,
 ) -> tuple[list[Any], list[Any | None]]:
-	currency_klines = pl.read_parquet(parquet_path)
 	group_keys = [c for c in ("Symbol", "Interval") if c in currency_klines.columns]
 
 	groups = currency_klines.partition_by(group_keys, maintain_order=True) if group_keys else [currency_klines]
@@ -21,8 +21,11 @@ def build_group_series(
 	time_groups = []
 
 	for group in groups:
-		value_groups.append(group.select(feature_columns).to_numpy())
-		time_groups.append(group.get_column(time_column).to_numpy())
+		value_groups.append(np.array(group.select(feature_columns).to_numpy(), copy=True))
+		if time_column is not None and time_column in group.columns:
+			time_groups.append(np.array(group.get_column(time_column).to_numpy(), copy=True))
+		else:
+			time_groups.append(None)
 
 	return value_groups, time_groups
 
@@ -145,7 +148,7 @@ class CandleWindowArrayDataset(Dataset[Any]):
 		return result
 
 def create_candle_train_val_dataloaders(
-	parquet_path: Path | str,
+	fin_time_series: pl.DataFrame,
 	feature_columns,
 	window_size: int,
 	step_size: int,
@@ -163,7 +166,7 @@ def create_candle_train_val_dataloaders(
 	normalization_eps: float = 1e-6,
 ) -> tuple[DataLoader[Any], DataLoader[Any], dict[str, torch.Tensor] | None]:
 	value_groups, time_groups = build_group_series(
-		parquet_path,
+		fin_time_series,
 		feature_columns,
 		time_column=time_column,
 	)

@@ -68,8 +68,8 @@ def plot_random_denoise_samples(
                 },
                 device=device,
                 N = 10,
-                T_prime=100,
-                corrector_steps=8,
+                T_prime=300,
+                corrector_steps=15,
                 f_cutoff=0.1,
             )
 

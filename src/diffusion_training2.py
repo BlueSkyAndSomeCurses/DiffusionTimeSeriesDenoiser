@@ -76,13 +76,13 @@ def _(DiffusionModel, create_candle_train_val_dataloaders, pl, torch):
 
 @app.cell
 def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
-    bnb_12h = pl.read_parquet(
-        "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/bnbusdt_candles_2008_12h.parquet"
+    eth_12h = pl.read_parquet(
+        "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/ethusdt_candles_2008_12h.parquet"
     )
 
 
-    model_12h, losses_12h = train_diffusion_from_parquet(
-        bnb_12h,
+    model_12h_eth, losses_12h_eth = train_diffusion_from_parquet(
+        eth_12h,
         value_column=VALUE_COLUMN,
         time_column=TIME_COLUMN,
         window_size=60,
@@ -91,18 +91,18 @@ def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
         timesteps=1000,
         epochs=200,
         lr=1e-4,
-        model_save_path="models/bnb_12h_denoiser",
+        model_save_path="models/eth_12h_denoiser",
     )
     return
 
 
 @app.cell
 def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
-    bnb_1h = pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/bnbusdt_candles_2020_1h.parquet")
+    eth_1h = pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/ethusdt_candles_2020_1h.parquet")
 
 
-    model_1h, losses_1h = train_diffusion_from_parquet(
-        bnb_1h,
+    model_1h_eth, losses_1h_eth = train_diffusion_from_parquet(
+        eth_1h,
         value_column=VALUE_COLUMN,
         time_column=TIME_COLUMN,
         window_size=60,
@@ -111,19 +111,19 @@ def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
         timesteps=1000,
         epochs=200,
         lr=1e-4,
-        model_save_path="models/bnb_1h_denoiser",
+        model_save_path="models/eth_1h_denoiser",
     )
     return
 
 
 @app.cell
 def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
-    bnb_15m = pl.read_parquet(
-        "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/bnbusdt_candles_2022_15m.parquet"
+    eth_15m = pl.read_parquet(
+        "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/ethusdt_candles_2022_15m.parquet"
     )
 
-    model_15m, losses_15m = train_diffusion_from_parquet(
-        bnb_15m,
+    model_15m_eth, losses_15m_eth = train_diffusion_from_parquet(
+        eth_15m,
         value_column=VALUE_COLUMN,
         time_column=TIME_COLUMN,
         window_size=60,
@@ -132,17 +132,17 @@ def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
         timesteps=1000,
         epochs=200,
         lr=1e-4,
-        model_save_path="models/bnb_15m_denoiser",
+        model_save_path="models/eth_15m_denoiser",
     )
     return
 
 
 @app.cell
 def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
-    bnb_1m = pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/bnbusdt_candles_2025_1m.parquet")
+    eth_1m = pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/ethusdt_candles_2025_1m.parquet")
 
-    model_1m, losses_1m = train_diffusion_from_parquet(
-        bnb_1m,
+    model_1m_eth, losses_1m_eth = train_diffusion_from_parquet(
+        eth_1m,
         value_column=VALUE_COLUMN,
         time_column=TIME_COLUMN,
         window_size=60,
@@ -151,20 +151,29 @@ def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
         timesteps=1000,
         epochs=200,
         lr=1e-4,
-        model_save_path="models/bnb_1m_denoiser",
+        model_save_path="models/eth_1m_denoiser",
     )
     return
 
 
 @app.cell
 def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
-    xrp_12h = pl.read_parquet(
-        "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/xrpusdt_candles_2008_12h.parquet"
+    crypto_12h = pl.concat(
+        [
+            pl.read_parquet(
+                "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/bnbusdt_candles_2008_12h.parquet"
+            ),
+            pl.read_parquet(
+                "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/ethusdt_candles_2008_12h.parquet"
+            ),
+            pl.read_parquet(
+                "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/xrpusdt_candles_2008_12h.parquet"
+            ),
+        ]
     )
 
-
-    model_12h_xrp, losses_12h_xrp = train_diffusion_from_parquet(
-        xrp_12h,
+    model_12h_general, losses_12h_general = train_diffusion_from_parquet(
+        crypto_12h,
         value_column=VALUE_COLUMN,
         time_column=TIME_COLUMN,
         window_size=60,
@@ -173,21 +182,23 @@ def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
         timesteps=1000,
         epochs=200,
         lr=1e-4,
-        model_save_path="models/xrp_12h_denoiser",
+        model_save_path="models/general_12h",
     )
-    return
+    return (crypto_12h,)
 
 
 @app.cell
 def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
-
-    xrp_1h = pl.read_parquet(
-        "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/xrpusdt_candles_2020_1h.parquet"
+    crypto_1h = pl.concat(
+        [
+            pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/bnbusdt_candles_2020_1h.parquet"),
+            pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/ethusdt_candles_2020_1h.parquet"),
+            pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/xrpusdt_candles_2020_1h.parquet"),
+        ]
     )
 
-
-    model_1h_xrp, losses_1h_xrp = train_diffusion_from_parquet(
-        xrp_1h,
+    model_1h_general, losses_1h_general = train_diffusion_from_parquet(
+        crypto_1h,
         value_column=VALUE_COLUMN,
         time_column=TIME_COLUMN,
         window_size=60,
@@ -196,20 +207,29 @@ def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
         timesteps=1000,
         epochs=200,
         lr=1e-4,
-        model_save_path="models/xrp_1h_denoiser",
+        model_save_path="models/general_1h",
     )
-    return
+    return (crypto_1h,)
 
 
 @app.cell
 def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
-    xrp_15m = pl.read_parquet(
-        "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/xrpusdt_candles_2022_15m.parquet"
+    crypto_15m = pl.concat(
+        [
+            pl.read_parquet(
+                "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/bnbusdt_candles_2022_15m.parquet"
+            ),
+            pl.read_parquet(
+                "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/ethusdt_candles_2022_15m.parquet"
+            ),
+            pl.read_parquet(
+                "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/xrpusdt_candles_2022_15m.parquet"
+            ),
+        ]
     )
 
-
-    model_15m_xrp, losses_15m_xrp = train_diffusion_from_parquet(
-        xrp_15m,
+    model_15m_general, losses_15m_general = train_diffusion_from_parquet(
+        crypto_15m,
         value_column=VALUE_COLUMN,
         time_column=TIME_COLUMN,
         window_size=60,
@@ -218,21 +238,23 @@ def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
         timesteps=1000,
         epochs=200,
         lr=1e-4,
-        model_save_path="models/xrp_15m_denoiser",
+        model_save_path="models/general_15m",
     )
-    return
+    return (crypto_15m,)
 
 
 @app.cell
 def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
-
-    xrp_1m = pl.read_parquet(
-        "/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/xrpusdt_candles_2025_1m.parquet"
+    crypto_1m = pl.concat(
+        [
+            pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/bnbusdt_candles_2025_1m.parquet"),
+            pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/ethusdt_candles_2025_1m.parquet"),
+            pl.read_parquet("/Users/vitya/Documents/MMML/DIffusionTImeSeriesDenoiser/data/xrpusdt_candles_2025_1m.parquet"),
+        ]
     )
 
-
-    model_1m_xrp, losses_1m_xrp = train_diffusion_from_parquet(
-        xrp_1m,
+    model_1m_general, losses_1m_general = train_diffusion_from_parquet(
+        crypto_1m,
         value_column=VALUE_COLUMN,
         time_column=TIME_COLUMN,
         window_size=60,
@@ -241,13 +263,37 @@ def _(TIME_COLUMN, VALUE_COLUMN, pl, train_diffusion_from_parquet):
         timesteps=1000,
         epochs=200,
         lr=1e-4,
-        model_save_path="models/xrp_1m_denoiser",
+        model_save_path="models/general_1m",
     )
-    return
+    return (crypto_1m,)
 
 
 @app.cell
-def _():
+def _(
+    TIME_COLUMN,
+    VALUE_COLUMN,
+    crypto_12h,
+    crypto_15m,
+    crypto_1h,
+    crypto_1m,
+    pl,
+    train_diffusion_from_parquet,
+):
+    all_crypto_data = pl.concat([crypto_1m, crypto_15m, crypto_1h, crypto_12h])
+
+
+    model_general, losses_general = train_diffusion_from_parquet(
+        all_crypto_data,
+        value_column=VALUE_COLUMN,
+        time_column=TIME_COLUMN,
+        window_size=60,
+        step_size=20,
+        batch_size=64,
+        timesteps=1000,
+        epochs=200,
+        lr=1e-4,
+        model_save_path="models/general_model",
+    )
     return
 
 

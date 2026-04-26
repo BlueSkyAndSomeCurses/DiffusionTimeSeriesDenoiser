@@ -17,6 +17,7 @@ def _():
     return (
         DiffusionModel,
         create_candle_train_val_dataloaders,
+        pl,
         plot_random_denoise_samples,
         torch,
     )
@@ -24,7 +25,7 @@ def _():
 
 @app.cell
 def _(torch):
-    TIMESTAMPS = 200
+    TIMESTAMPS = 1000
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     print(device)
     return TIMESTAMPS, device
@@ -38,9 +39,9 @@ def _(DiffusionModel, TIMESTAMPS, device, torch):
 
 
 @app.cell
-def _(create_candle_train_val_dataloaders, torch):
+def _(create_candle_train_val_dataloaders, pl, torch):
     train_dataloader_12h, val_dataloader_12h, _ = create_candle_train_val_dataloaders(
-        parquet_path="data/bnbusdt_candles_2025_12h.parquet",
+        pl.read_parquet("data/bnbusdt_candles_2025_12h.parquet"),
         feature_columns=["Close"],
         window_size=60,
         step_size=20,
@@ -67,6 +68,7 @@ def _(
     TIMESTAMPS,
     create_candle_train_val_dataloaders,
     device,
+    pl,
     plot_random_denoise_samples,
     torch,
 ):
@@ -74,7 +76,7 @@ def _(
     model_1h.load_state_dict(torch.load("models/bnb_1h_denoiser"))
 
     train_dataloader_1h, val_dataloader_1h, _ = create_candle_train_val_dataloaders(
-        parquet_path="data/bnbusdt_candles_2025_1h.parquet",
+        pl.read_parquet("data/bnbusdt_candles_2025_1h.parquet"),
         feature_columns=["Close"],
         window_size=60,
         step_size=20,
@@ -97,6 +99,7 @@ def _(
     TIMESTAMPS,
     create_candle_train_val_dataloaders,
     device,
+    pl,
     plot_random_denoise_samples,
     torch,
 ):
@@ -104,7 +107,7 @@ def _(
     model_15m.load_state_dict(torch.load("models/bnb_15m_denoiser"))
 
     train_dataloader_15m, val_dataloader_15m, _ = create_candle_train_val_dataloaders(
-        parquet_path="data/bnbusdt_candles_2025_15m.parquet",
+        pl.read_parquet("data/bnbusdt_candles_2025_15m.parquet"),
         feature_columns=["Close"],
         window_size=60,
         step_size=20,
@@ -127,6 +130,7 @@ def _(
     TIMESTAMPS,
     create_candle_train_val_dataloaders,
     device,
+    pl,
     plot_random_denoise_samples,
     torch,
 ):
@@ -134,7 +138,7 @@ def _(
     model_1m.load_state_dict(torch.load("models/bnb_1m_denoiser"))
 
     train_dataloader_1m, val_dataloader_1m, _ = create_candle_train_val_dataloaders(
-        parquet_path="data/bnbusdt_candles_2025_1m.parquet",
+        pl.read_parquet("data/bnbusdt_candles_2025_1m.parquet"),
         feature_columns=["Close"],
         window_size=60,
         step_size=20,

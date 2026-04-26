@@ -560,7 +560,7 @@ class DiffusionModel(nn.Module):
 	def financial_time_series_inference(
 		self: DiffusionModel,
 		sample: dict[str , torch.Tensor  | dict[str, torch.Tensor]],
-		device,
+		device: torch.device,
 		N: int,
 		T_prime: int,
 		corrector_steps: int,
@@ -570,29 +570,29 @@ class DiffusionModel(nn.Module):
 		guidance_scale: float = 3.0,
 		langevin_snr: float = 0.16,
 		seq_dim: int = -1
-    ) -> torch.Tensor:
+	) -> torch.Tensor:
+		x0 = sample.get("x0")
+		condition = sample.get("condition")
+		if not isinstance(x0, torch.Tensor):
+			raise ValueError("sample['x0'] must be a torch.Tensor")
+		if not isinstance(condition, dict) or "x_co" not in condition:
+			raise ValueError("sample['condition'] must be a dict containing key 'x_co'")
+
+		x0 = x0.to(device)
+		condition = self.move_condition_to_device(condition, device)
+
+		batch_size = 1 if x0.dim() == 1 else x0.shape[0]
+		K = max(1, int(N * T_prime / self.timesteps))
+		t_prime_vector = torch.full((batch_size,), int(T_prime), device=device, dtype=torch.long)
+
 		x_list = []
-		K = int(N * T_prime / self.timesteps)
-
 		for _ in range(s):
-			x0 = sample.get("x0")
-			condition = sample.get("condition")
-			if not isinstance(x0, torch.Tensor):
-				raise ValueError("sample['x0'] must be a torch.Tensor")
-			if not isinstance(condition, dict) or "x_co" not in condition:
-				raise ValueError("sample['condition'] must be a dict containing key 'x_co'")
-
-			x0 = x0.to(device)
-			condition = self.move_condition_to_device(condition, device)
-			batch_size = x0.shape[0]
-
-			T_prime_vector = torch.full((1,), T_prime, device=device, dtype=torch.long)
-
-			x_K, _ = self.add_noise(x0, T_prime_vector)
+			x_K, _ = self.add_noise(x0, t_prime_vector)
 			x_i = x_K
 
-			for i in range(K-1, 0, -1):
-				t_i = torch.full((1,), (i+1) * T_prime / N, device=device, dtype=torch.long)
+			for i in range(K - 1, 0, -1):
+				step_value = int((i + 1) * T_prime / N)
+				t_i = torch.full((batch_size,), step_value, device=device, dtype=torch.long)
 				x_i = self.denoise_step(x_i, t_i, condition=condition, guidance_scale=guidance_scale)
 
 				for j in range(1, corrector_steps):
@@ -609,12 +609,9 @@ class DiffusionModel(nn.Module):
 
 				with torch.enable_grad():
 					x_in = x_i.detach().requires_grad_(True)
-					
 					loss_tv = total_variation_loss(x_in, seq_dim=seq_dim)
 					loss_f = fourier_loss(x_in, condition["x_co"], f=f_cutoff, seq_dim=seq_dim)
-					
 					total_loss = (eta * loss_tv) + (eta * loss_f)
-					
 					grad_x = torch.autograd.grad(total_loss, x_in)[0]
 
 				x_i = x_i - grad_x
