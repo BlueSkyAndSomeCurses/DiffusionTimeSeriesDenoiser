@@ -139,7 +139,7 @@ class FinancialDiffusionInferenceRunner:
 		seq_dim: int = -1,
 	) -> ValidationInferenceResult:
 		model_path = Path(model_params_path)
-		model = self._load_model(model_path)
+		model = self.load_model(model_path)
 
 		group_keys = [c for c in ("Symbol", "Interval") if c in fin_time_series.columns]
 		grouped = fin_time_series.partition_by(group_keys, maintain_order=True) if group_keys else [fin_time_series]
@@ -168,7 +168,7 @@ class FinancialDiffusionInferenceRunner:
 			val_values = apply_normalization(val_values, norm_mean, norm_std)
 
 
-		train_results = self._run_split_inference(
+		train_results = self.run_split_inference(
 			model=model,
 			split_values=train_values,
 			split_values_raw=train_values_raw,
@@ -187,7 +187,7 @@ class FinancialDiffusionInferenceRunner:
 			eligible_group_keys=eligible_group_keys,
 		)
 
-		val_results = self._run_split_inference(
+		val_results = self.run_split_inference(
 			model=model,
 			split_values=val_values,
 			split_values_raw=val_values_raw,
@@ -213,7 +213,7 @@ class FinancialDiffusionInferenceRunner:
 			validation_split=val_results,
 		)
 
-	def _empty_split_result(
+	def empty_split_result(
 		self,
 		window_size: int,
 		k_future_points: int,
@@ -227,7 +227,7 @@ class FinancialDiffusionInferenceRunner:
 			k_future_points=k_future_points,
 		)
 
-	def _load_model(self, model_params_path: Path) -> DiffusionModel:
+	def load_model(self, model_params_path: Path) -> DiffusionModel:
 		model = DiffusionModel(timesteps=self.timesteps).to(self.device)
 		checkpoint = torch.load(model_params_path, map_location=self.device)
 
@@ -242,7 +242,7 @@ class FinancialDiffusionInferenceRunner:
 		model.eval()
 		return model
 
-	def _window_time_index(self, time_values: Any | None, start: int, size: int) -> torch.Tensor:
+	def window_time_index(self, time_values: Any | None, start: int, size: int) -> torch.Tensor:
 		if time_values is None:
 			return torch.arange(size, dtype=self.dtype)
 
@@ -251,15 +251,8 @@ class FinancialDiffusionInferenceRunner:
 			time_window = time_window - time_window[0]
 		return time_window
 
-	def _time_slice_for_output(self, time_values: Any | None, start: int, end: int) -> torch.Tensor:
-		size = max(0, end - start)
-		if time_values is None:
-			return torch.arange(start, end, dtype=self.dtype)
-		if size == 0:
-			return torch.empty((0,), dtype=self.dtype)
-		return torch.as_tensor(time_values[start:end], dtype=self.dtype)
 
-	def _as_2d(self, tensor: torch.Tensor, n_features: int) -> torch.Tensor:
+	def as_2d(self, tensor: torch.Tensor, n_features: int) -> torch.Tensor:
 		if tensor.dim() == 1:
 			return tensor.unsqueeze(-1)
 		if tensor.dim() == 2:
@@ -269,10 +262,10 @@ class FinancialDiffusionInferenceRunner:
 				return tensor.transpose(0, 1)
 			return tensor.unsqueeze(-1)
 		if tensor.dim() == 3 and tensor.shape[0] == 1:
-			return self._as_2d(tensor.squeeze(0), n_features)
+			return self.as_2d(tensor.squeeze(0), n_features)
 		raise ValueError(f"Unsupported tensor shape for conversion to [T, F]: {tuple(tensor.shape)}")
 
-	def _run_split_inference(
+	def run_split_inference(
 		self,
 		model: DiffusionModel,
 		split_values: list[Any],
@@ -322,7 +315,7 @@ class FinancialDiffusionInferenceRunner:
 				x0_batch = window_batch_2d[:, :, 0] if window_batch_2d.shape[-1] == 1 else window_batch_2d
 				time_index_batch = torch.stack(
 					[
-						self._window_time_index(
+						self.window_time_index(
 							split_time_group,
 							start=start,
 							size=self.window_size,
@@ -352,7 +345,7 @@ class FinancialDiffusionInferenceRunner:
 				).detach().cpu()
 
 				for batch_idx, start in enumerate(batch_starts):
-					denoised_window_2d = self._as_2d(denoised_batch[batch_idx], len(feature_columns))
+					denoised_window_2d = self.as_2d(denoised_batch[batch_idx], len(feature_columns))
 					original_window_2d = np.asarray(split_group[start : start + self.window_size], dtype=np.float32)
 					original_window_raw_2d = np.asarray(split_group_raw[start : start + self.window_size], dtype=np.float32)
 
@@ -383,9 +376,9 @@ class FinancialDiffusionInferenceRunner:
 					denoised_rows.append(denoised_flat)
 					next_k_rows.append(next_k_flat)
 
-		group_keys = [self._resolve_group_key(eligible_group_keys, i) for i in range(len(split_values))]
+		group_keys = [self.resolve_group_key(eligible_group_keys, i) for i in range(len(split_values))]
 		if not original_rows:
-			return self._empty_split_result(
+			return self.empty_split_result(
 				window_size=self.window_size,
 				k_future_points=k_future_points,
 			)
@@ -399,7 +392,7 @@ class FinancialDiffusionInferenceRunner:
 			k_future_points=k_future_points,
 		)
 
-	def _resolve_group_key(self, grouped_frames: list[pl.DataFrame], idx: int) -> dict[str, Any]:
+	def resolve_group_key(self, grouped_frames: list[pl.DataFrame], idx: int) -> dict[str, Any]:
 		if idx >= len(grouped_frames):
 			return {"group_index": idx}
 

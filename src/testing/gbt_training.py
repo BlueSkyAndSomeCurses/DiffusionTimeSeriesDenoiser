@@ -31,23 +31,7 @@ class GradientBoostedTreeTrainingResult:
 	mcc: list[float]
 
 
-def _flat_to_1d(flat_tensor) -> np.ndarray:
-	flat = flat_tensor.detach().cpu().numpy().reshape(-1)
-	return flat.astype(np.float32, copy=False)
-
-
-def _as_float32_matrix(X: np.ndarray) -> np.ndarray:
-	if X.ndim != 2:
-		raise ValueError(f"Expected 2D feature matrix, got shape={X.shape}")
-	if X.shape[0] == 0 or X.shape[1] == 0:
-		raise ValueError(f"Feature matrix is empty, got shape={X.shape}")
-	X = np.asarray(X, dtype=np.float32)
-	if not np.isfinite(X).all():
-		raise ValueError("Feature matrix contains NaN or Inf values")
-	return np.ascontiguousarray(X)
-
-
-def _drop_null_rows_from_xy(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def drop_null_rows_from_xy(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 	X_arr = np.asarray(X)
 	y_arr = np.asarray(y)
 
@@ -86,34 +70,7 @@ def _drop_null_rows_from_xy(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, n
 
 	return X_filtered, y_filtered
 
-
-def _extract_price_future_from_flat(
-	next_flat: np.ndarray,
-	n_features: int,
-	price_feature_index: int,
-	future_time_points_num: int,
-) -> np.ndarray:
-	if future_time_points_num < 1:
-		return np.empty((0,), dtype=np.float64)
-
-	if next_flat.size == 0:
-		return np.empty((0,), dtype=np.float64)
-
-	if n_features <= 1:
-		return next_flat[:future_time_points_num].astype(np.float64, copy=False)
-
-	full_steps = next_flat.size // n_features
-	if full_steps == 0:
-		return np.empty((0,), dtype=np.float64)
-
-	trimmed = next_flat[: full_steps * n_features]
-	next_2d = trimmed.reshape(full_steps, n_features)
-	max_col = n_features - 1
-	col = int(min(max(price_feature_index, 0), max_col))
-	return next_2d[:future_time_points_num, col].astype(np.float64, copy=False)
-
-
-def _build_estimator(
+def build_estimator(
 	backend: str,
 	random_state: int,
 	n_estimators: int,
@@ -176,7 +133,7 @@ def _fit_predict_per_horizon(
 		constant_labels.append(label)
 		pred_cols.append(np.full((X_val.shape[0],), label, dtype=np.int64))
 
-	estimator = _build_estimator(
+	estimator = build_estimator(
 		backend=backend,
 		random_state=random_state,
 		n_estimators=n_estimators,
@@ -188,9 +145,7 @@ def _fit_predict_per_horizon(
 		colsample_bytree=colsample_bytree,
 	)
 	estimator.fit(X_train, y_train_xgb)
-	print("true values", y_train_xgb)
 	pred = estimator.predict(X_val)
-	print("predictions", pred)
 	estimators.append(estimator)
 	constant_labels.append(None)
 	pred_cols.append(np.asarray(pred, dtype=np.int64).reshape(-1))
@@ -220,8 +175,8 @@ def train_gbt_from_validation_result(
 	X_val = validation_result.validation_split.original_subsequence if use_denoised_features is False else validation_result.validation_split.denoised_subsequence
 	y_val = validation_result.validation_split.next_k_points[:, future_time_points_num]
 
-	X_train, y_train = _drop_null_rows_from_xy(X_train, y_train)
-	X_val, y_val = _drop_null_rows_from_xy(X_val, y_val)
+	X_train, y_train = drop_null_rows_from_xy(X_train, y_train)
+	X_val, y_val = drop_null_rows_from_xy(X_val, y_val)
 	
 	model, y_pred = _fit_predict_per_horizon(
 		X_train,
